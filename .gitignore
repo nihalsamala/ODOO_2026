@@ -1,0 +1,35 @@
+# Node & Frontend
+node_modules/
+dist/
+dist-ssr/
+*.local
+.env.local
+.env.*.local
+
+# Java & Spring Boot
+target/
+*.class
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+# IDE & Editors
+.idea/
+.vscode/
+*.iws
+*.iml
+*.ipr
+.project
+.classpath
+.settings/
+
+# OS & Environment
+Thumbs.db
+.DS_Store
+*.log
+# Temporary scripts
+powershell.cmd
+get_dashboard.ps1
+
+# Temporary demo lock/cache files
+~$*
