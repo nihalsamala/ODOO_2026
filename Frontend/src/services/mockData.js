@@ -10,17 +10,24 @@ const INITIAL_MOCK_DATA = {
   users: [
     {
       id: 'usr_admin',
-      name: 'Alex Patel',
-      email: 'admin@subscriptiq.io',
+      name: 'SubscriptIQ Admin',
+      email: 'admin@subscriptiq.com',
       role: 'ADMIN',
       token: 'mock-jwt-admin-token-xyz',
     },
     {
       id: 'usr_staff',
-      name: 'Sarah Jenkins',
-      email: 'staff@brightloop.com',
+      name: 'SubscriptIQ Staff',
+      email: 'staff@subscriptiq.com',
       role: 'STAFF',
       token: 'mock-jwt-staff-token-xyz',
+    },
+    {
+      id: 'usr_customer',
+      name: 'Demo Customer',
+      email: 'user@subscriptiq.com',
+      role: 'CUSTOMER',
+      token: 'mock-jwt-customer-token-1',
     },
     {
       id: 'cust_1',

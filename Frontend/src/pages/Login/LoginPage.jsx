@@ -240,6 +240,32 @@ export function LoginPage() {
                   ADMIN
                 </span>
               </button>
+              <button
+                type="button"
+                onClick={() => handleDemoFill('staff@subscriptiq.com', 'Staff@123')}
+                className="btn btn-secondary btn-sm"
+                style={{ justifyContent: 'space-between', width: '100%' }}
+              >
+                <span>
+                  <strong>Staff:</strong> staff@subscriptiq.com
+                </span>
+                <span className="badge badge-info" style={{ fontSize: '0.65rem' }}>
+                  STAFF
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDemoFill('user@subscriptiq.com', 'User@123')}
+                className="btn btn-secondary btn-sm"
+                style={{ justifyContent: 'space-between', width: '100%' }}
+              >
+                <span>
+                  <strong>User:</strong> user@subscriptiq.com
+                </span>
+                <span className="badge badge-success" style={{ fontSize: '0.65rem' }}>
+                  CUSTOMER
+                </span>
+              </button>
             </div>
           </div>
         </div>
