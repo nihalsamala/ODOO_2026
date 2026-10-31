@@ -11,6 +11,7 @@ import SubscriptionsPage from './pages/Subscriptions/SubscriptionsPage';
 import InvoicesPage from './pages/Invoices/InvoicesPage';
 import DiscountRulesPage from './pages/DiscountRules/DiscountRulesPage';
 import TaxRulesPage from './pages/TaxRules/TaxRulesPage';
+import CatalogPage from './pages/Catalog/CatalogPage';
 import NotFoundPage from './pages/NotFound/NotFoundPage';
 
 /**
@@ -82,6 +83,15 @@ export function App() {
                 element={
                   <RoleGuard allowedRoles={['ADMIN', 'STAFF']} fallback="/subscriptions">
                     <PlansPage />
+                  </RoleGuard>
+                }
+              />
+
+              <Route
+                path="/catalog"
+                element={
+                  <RoleGuard allowedRoles={['ADMIN', 'STAFF', 'CUSTOMER']} fallback="/dashboard">
+                    <CatalogPage />
                   </RoleGuard>
                 }
               />

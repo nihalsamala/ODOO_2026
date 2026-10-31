@@ -13,12 +13,19 @@ import com.subscription.backend.plan.PlanService;
 import com.subscription.backend.product.Product;
 import com.subscription.backend.product.ProductRepository;
 import com.subscription.backend.product.ProductType;
+import com.subscription.backend.invoice.InvoiceService;
+import com.subscription.backend.product.ProductVariant;
+import com.subscription.backend.product.ProductVariantRepository;
+import com.subscription.backend.security.Role;
+import com.subscription.backend.security.UserPrincipal;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.security.access.AccessDeniedException;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -52,6 +59,12 @@ class SubscriptionServiceTest {
 
     @Mock
     private AuthService authService;
+
+    @Mock
+    private ProductVariantRepository productVariantRepository;
+
+    @Mock
+    private InvoiceService invoiceService;
 
     @InjectMocks
     private SubscriptionService subscriptionService;
@@ -325,5 +338,251 @@ class SubscriptionServiceTest {
                 subscriptionService.getUpcomingRenewalAlerts(7, null, asOfDate);
 
         assertTrue(alerts.isEmpty());
+    }
+
+    // ==========================================
+    // Customer Purchase Workflow Tests
+    // ==========================================
+
+    @Test
+    void testPurchaseSubscription_Success() {
+        UserPrincipal customerPrincipal = new UserPrincipal(
+                10L, "user@test.com", "pass", Role.CUSTOMER, 1L, List.of()
+        );
+        when(authService.getCurrentUser()).thenReturn(customerPrincipal);
+
+        when(customerRepository.findById(1L)).thenReturn(Optional.of(sampleCustomer));
+        when(productRepository.findById(10L)).thenReturn(Optional.of(sampleProduct));
+        when(planRepository.findById(20L)).thenReturn(Optional.of(samplePlan));
+        doNothing().when(planService).validateProductPlanCompatibility(10L, 20L);
+
+        when(subscriptionRepository.save(any(Subscription.class))).thenAnswer(invocation -> {
+            Subscription s = invocation.getArgument(0);
+            s.setId(201L);
+            return s;
+        });
+
+        SubscriptionDto.CustomerPurchaseRequest request = SubscriptionDto.CustomerPurchaseRequest.builder()
+                .productId(10L)
+                .planId(20L)
+                .quantity(3)
+                .build();
+
+        SubscriptionDto.SubscriptionResponse response = subscriptionService.purchaseSubscription(request);
+
+        assertNotNull(response);
+        assertEquals(201L, response.getId());
+        assertEquals(1L, response.getCustomerId());
+        assertEquals(SubscriptionStatus.CONFIRMED, response.getStatus());
+        // Unit price = product sales price (100.00) + plan price (20.00) = 120.00
+        assertEquals(new BigDecimal("120.00"), response.getAgreedUnitPrice());
+        // Subtotal = 120.00 * 3 = 360.00
+        assertEquals(new BigDecimal("360.00"), response.getSubtotal());
+
+        // Verifies initial invoice generation for the confirmed subscription
+        verify(invoiceService).createInvoiceForPeriod(any(Subscription.class), eq(LocalDate.now()));
+    }
+
+    @Test
+    void testPurchaseSubscription_WithActiveVariant_Success() {
+        UserPrincipal customerPrincipal = new UserPrincipal(
+                10L, "user@test.com", "pass", Role.CUSTOMER, 1L, List.of()
+        );
+        when(authService.getCurrentUser()).thenReturn(customerPrincipal);
+
+        ProductVariant variant = ProductVariant.builder()
+                .id(30L)
+                .product(sampleProduct)
+                .name("High Speed")
+                .priceAdjustment(new BigDecimal("15.00"))
+                .active(true)
+                .build();
+
+        when(customerRepository.findById(1L)).thenReturn(Optional.of(sampleCustomer));
+        when(productRepository.findById(10L)).thenReturn(Optional.of(sampleProduct));
+        when(planRepository.findById(20L)).thenReturn(Optional.of(samplePlan));
+        when(productVariantRepository.findById(30L)).thenReturn(Optional.of(variant));
+        doNothing().when(planService).validateProductPlanCompatibility(10L, 20L);
+
+        when(subscriptionRepository.save(any(Subscription.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        SubscriptionDto.CustomerPurchaseRequest request = SubscriptionDto.CustomerPurchaseRequest.builder()
+                .productId(10L)
+                .planId(20L)
+                .variantId(30L)
+                .quantity(2)
+                .build();
+
+        SubscriptionDto.SubscriptionResponse response = subscriptionService.purchaseSubscription(request);
+
+        assertNotNull(response);
+        // Unit price = 100.00 + 15.00 (variant) + 20.00 (plan) = 135.00
+        assertEquals(new BigDecimal("135.00"), response.getAgreedUnitPrice());
+        // Subtotal = 135.00 * 2 = 270.00
+        assertEquals(new BigDecimal("270.00"), response.getSubtotal());
+        assertEquals(SubscriptionStatus.CONFIRMED, response.getStatus());
+        verify(invoiceService).createInvoiceForPeriod(any(Subscription.class), eq(LocalDate.now()));
+    }
+
+    @Test
+    void testPurchaseSubscription_UnauthenticatedOrNonCustomer_ThrowsAccessDenied() {
+        // 1. Unauthenticated (null currentUser)
+        when(authService.getCurrentUser()).thenReturn(null);
+        SubscriptionDto.CustomerPurchaseRequest request = SubscriptionDto.CustomerPurchaseRequest.builder()
+                .productId(10L).planId(20L).quantity(2).build();
+
+        assertThrows(AccessDeniedException.class, () -> subscriptionService.purchaseSubscription(request));
+
+        // 2. STAFF user
+        UserPrincipal staffPrincipal = new UserPrincipal(2L, "staff@test.com", "pass", Role.STAFF, null, List.of());
+        when(authService.getCurrentUser()).thenReturn(staffPrincipal);
+        assertThrows(AccessDeniedException.class, () -> subscriptionService.purchaseSubscription(request));
+
+        // 3. ADMIN user
+        UserPrincipal adminPrincipal = new UserPrincipal(3L, "admin@test.com", "pass", Role.ADMIN, null, List.of());
+        when(authService.getCurrentUser()).thenReturn(adminPrincipal);
+        assertThrows(AccessDeniedException.class, () -> subscriptionService.purchaseSubscription(request));
+
+        // 4. CUSTOMER role without customerId in token
+        UserPrincipal customerWithoutId = new UserPrincipal(4L, "cust@test.com", "pass", Role.CUSTOMER, null, List.of());
+        when(authService.getCurrentUser()).thenReturn(customerWithoutId);
+        assertThrows(AccessDeniedException.class, () -> subscriptionService.purchaseSubscription(request));
+    }
+
+    @Test
+    void testPurchaseSubscription_InactiveProduct_ThrowsBusinessRuleException() {
+        UserPrincipal customerPrincipal = new UserPrincipal(10L, "user@test.com", "pass", Role.CUSTOMER, 1L, List.of());
+        when(authService.getCurrentUser()).thenReturn(customerPrincipal);
+
+        Product inactiveProduct = Product.builder()
+                .id(11L)
+                .name("Legacy Product")
+                .salesPrice(new BigDecimal("50.00"))
+                .active(false)
+                .build();
+
+        when(customerRepository.findById(1L)).thenReturn(Optional.of(sampleCustomer));
+        when(productRepository.findById(11L)).thenReturn(Optional.of(inactiveProduct));
+
+        SubscriptionDto.CustomerPurchaseRequest request = SubscriptionDto.CustomerPurchaseRequest.builder()
+                .productId(11L).planId(20L).quantity(2).build();
+
+        BusinessRuleException ex = assertThrows(BusinessRuleException.class,
+                () -> subscriptionService.purchaseSubscription(request));
+        assertTrue(ex.getMessage().contains("inactive"));
+    }
+
+    @Test
+    void testPurchaseSubscription_InactiveOrUnavailablePlan_ThrowsBusinessRuleException() {
+        UserPrincipal customerPrincipal = new UserPrincipal(10L, "user@test.com", "pass", Role.CUSTOMER, 1L, List.of());
+        when(authService.getCurrentUser()).thenReturn(customerPrincipal);
+
+        when(customerRepository.findById(1L)).thenReturn(Optional.of(sampleCustomer));
+        when(productRepository.findById(10L)).thenReturn(Optional.of(sampleProduct));
+        when(planRepository.findById(20L)).thenReturn(Optional.of(samplePlan));
+
+        doThrow(new BusinessRuleException("Plan Pro Monthly expired on 2026-10-01"))
+                .when(planService).validateProductPlanCompatibility(10L, 20L);
+
+        SubscriptionDto.CustomerPurchaseRequest request = SubscriptionDto.CustomerPurchaseRequest.builder()
+                .productId(10L).planId(20L).quantity(2).build();
+
+        BusinessRuleException ex = assertThrows(BusinessRuleException.class,
+                () -> subscriptionService.purchaseSubscription(request));
+        assertTrue(ex.getMessage().contains("expired"));
+    }
+
+    @Test
+    void testPurchaseSubscription_IncompatibleProductPlanMapping_ThrowsBusinessRuleException() {
+        UserPrincipal customerPrincipal = new UserPrincipal(10L, "user@test.com", "pass", Role.CUSTOMER, 1L, List.of());
+        when(authService.getCurrentUser()).thenReturn(customerPrincipal);
+
+        when(customerRepository.findById(1L)).thenReturn(Optional.of(sampleCustomer));
+        when(productRepository.findById(10L)).thenReturn(Optional.of(sampleProduct));
+        when(planRepository.findById(20L)).thenReturn(Optional.of(samplePlan));
+
+        doThrow(new BusinessRuleException("Invalid combination: Product id 10 is not configured for Plan id 20"))
+                .when(planService).validateProductPlanCompatibility(10L, 20L);
+
+        SubscriptionDto.CustomerPurchaseRequest request = SubscriptionDto.CustomerPurchaseRequest.builder()
+                .productId(10L).planId(20L).quantity(2).build();
+
+        BusinessRuleException ex = assertThrows(BusinessRuleException.class,
+                () -> subscriptionService.purchaseSubscription(request));
+        assertTrue(ex.getMessage().contains("Invalid combination"));
+    }
+
+    @Test
+    void testPurchaseSubscription_InvalidVariant_ThrowsBusinessRuleException() {
+        UserPrincipal customerPrincipal = new UserPrincipal(10L, "user@test.com", "pass", Role.CUSTOMER, 1L, List.of());
+        when(authService.getCurrentUser()).thenReturn(customerPrincipal);
+
+        Product otherProduct = Product.builder().id(99L).name("Other").active(true).build();
+        ProductVariant variantOtherProduct = ProductVariant.builder()
+                .id(31L)
+                .product(otherProduct)
+                .name("Wrong Product Variant")
+                .active(true)
+                .build();
+
+        when(customerRepository.findById(1L)).thenReturn(Optional.of(sampleCustomer));
+        when(productRepository.findById(10L)).thenReturn(Optional.of(sampleProduct));
+        when(planRepository.findById(20L)).thenReturn(Optional.of(samplePlan));
+        doNothing().when(planService).validateProductPlanCompatibility(10L, 20L);
+        when(productVariantRepository.findById(31L)).thenReturn(Optional.of(variantOtherProduct));
+
+        SubscriptionDto.CustomerPurchaseRequest request = SubscriptionDto.CustomerPurchaseRequest.builder()
+                .productId(10L).planId(20L).variantId(31L).quantity(2).build();
+
+        BusinessRuleException ex = assertThrows(BusinessRuleException.class,
+                () -> subscriptionService.purchaseSubscription(request));
+        assertTrue(ex.getMessage().contains("does not belong to product"));
+    }
+
+    @Test
+    void testPurchaseSubscription_QuantityBelowMinimum_ThrowsBusinessRuleException() {
+        UserPrincipal customerPrincipal = new UserPrincipal(10L, "user@test.com", "pass", Role.CUSTOMER, 1L, List.of());
+        when(authService.getCurrentUser()).thenReturn(customerPrincipal);
+
+        when(customerRepository.findById(1L)).thenReturn(Optional.of(sampleCustomer));
+        when(productRepository.findById(10L)).thenReturn(Optional.of(sampleProduct));
+        when(planRepository.findById(20L)).thenReturn(Optional.of(samplePlan));
+        doNothing().when(planService).validateProductPlanCompatibility(10L, 20L);
+
+        // samplePlan minimumQuantity is 2
+        SubscriptionDto.CustomerPurchaseRequest request = SubscriptionDto.CustomerPurchaseRequest.builder()
+                .productId(10L).planId(20L).quantity(1).build();
+
+        BusinessRuleException ex = assertThrows(BusinessRuleException.class,
+                () -> subscriptionService.purchaseSubscription(request));
+        assertTrue(ex.getMessage().contains("less than the plan's minimum required quantity"));
+    }
+
+    @Test
+    void testPurchaseSubscription_StatusAlwaysConfirmedAndCustomerCannotBeOverridden() {
+        UserPrincipal customerPrincipal = new UserPrincipal(10L, "user@test.com", "pass", Role.CUSTOMER, 1L, List.of());
+        when(authService.getCurrentUser()).thenReturn(customerPrincipal);
+
+        when(customerRepository.findById(1L)).thenReturn(Optional.of(sampleCustomer));
+        when(productRepository.findById(10L)).thenReturn(Optional.of(sampleProduct));
+        when(planRepository.findById(20L)).thenReturn(Optional.of(samplePlan));
+        doNothing().when(planService).validateProductPlanCompatibility(10L, 20L);
+
+        ArgumentCaptor<Subscription> subCaptor = ArgumentCaptor.forClass(Subscription.class);
+        when(subscriptionRepository.save(subCaptor.capture())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        SubscriptionDto.CustomerPurchaseRequest request = SubscriptionDto.CustomerPurchaseRequest.builder()
+                .productId(10L).planId(20L).quantity(2).build();
+
+        subscriptionService.purchaseSubscription(request);
+
+        Subscription saved = subCaptor.getValue();
+        // Verify customer is strictly resolved from security context
+        assertEquals(1L, saved.getCustomer().getId());
+        // Verify status is strictly CONFIRMED (never ACTIVE or DRAFT)
+        assertEquals(SubscriptionStatus.CONFIRMED, saved.getStatus());
+        // Verify price was snapshotted
+        assertEquals(new BigDecimal("120.00"), saved.getAgreedUnitPrice());
+        assertEquals(new BigDecimal("240.00"), saved.getSubtotal());
     }
 }

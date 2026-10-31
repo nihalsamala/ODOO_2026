@@ -1,0 +1,118 @@
+{
+  "$schema": "https://raw.githubusercontent.com/TestSprite/testsprite-cli/v0.15.0/schemas/plan.schema.json",
+  "projectId": "5ac0881a-7e73-4b6c-b043-0e875721af69",
+  "type": "frontend",
+  "name": "SubscriptIQ - End-to-End Enterprise Subscription & Billing Lifecycle",
+  "description": "Comprehensive high-value E2E test plan covering authentication, role-based access control, product/plan catalog, subscription lifecycle, invoice calculation with taxes & discounts, partial payment verification, renewal alerts, and customer tenant data isolation.",
+  "priority": "p1",
+  "planSteps": [
+    {
+      "type": "action",
+      "description": "Navigate to /login, enter invalid credentials ('admin@subscriptiq.com' with an incorrect password 'WrongPassword!'), and submit the form."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify an error message is displayed indicating invalid credentials and the user remains unauthenticated on /login."
+    },
+    {
+      "type": "action",
+      "description": "Enter valid Administrator credentials ('admin@subscriptiq.com' / 'Admin@123') and submit the login form."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify successful redirection to /dashboard, displaying the 'SubscriptIQ Admin' user profile with 'ADMIN' badge and metric cards for 'Active Subscriptions', 'Payments Received', 'Outstanding Balance', and 'Overdue Invoices'."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the 'Subscription Renewal Alerts' section is visible on the dashboard, displaying upcoming subscription renewal items due within 7 days with status badges."
+    },
+    {
+      "type": "action",
+      "description": "Click 'Products' in the sidebar navigation to view the product catalog."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the Products page loads displaying seeded catalog items such as 'Cloud Storage Engine' and 'Project Management Suite' with sales pricing and recurring billing eligibility."
+    },
+    {
+      "type": "action",
+      "description": "Click 'Plans' in the sidebar navigation to inspect recurring subscription plans."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the Plans page renders configured recurring plans such as 'Starter Monthly Plan' and 'Growth Monthly Plan' with billing intervals and pricing details."
+    },
+    {
+      "type": "action",
+      "description": "Click 'Subscriptions' in the sidebar navigation to view subscriptions management."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the subscriptions table displays existing subscriptions (e.g. 'SUB-2026-1001') with customer names, plan names, next billing dates, and lifecycle statuses (ACTIVE, CONFIRMED, PAUSED)."
+    },
+    {
+      "type": "action",
+      "description": "Click the 'Details' button on an active subscription row to open the Subscription Details modal."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the Subscription Details modal opens displaying contract metadata, agreed pricing, and valid lifecycle control actions (such as Pause and Close)."
+    },
+    {
+      "type": "action",
+      "description": "Close the Subscription Details modal and navigate to 'Invoices' via the sidebar."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the Invoices page renders generated invoices (e.g. 'INV-2026-1001') showing issue dates, due dates, total amounts, paid amounts, and payment status badges."
+    },
+    {
+      "type": "action",
+      "description": "Click the 'View' button on an invoice row to open the Invoice Details modal."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the invoice detail modal displays itemized product lines, calculated taxes, applied discounts, total amount, amount paid, and outstanding balance."
+    },
+    {
+      "type": "action",
+      "description": "Close the Invoice Details modal, locate an invoice with an outstanding balance, and click its 'Pay' button to open the Record Payment modal."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify the Record Payment modal opens showing the invoice number, current outstanding balance, and payment method selector."
+    },
+    {
+      "type": "action",
+      "description": "Enter a payment amount exceeding the outstanding balance (e.g., 999999.00) and click 'Submit Payment'."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify an error message is displayed indicating the payment amount cannot exceed the outstanding balance, preventing invalid payment submission."
+    },
+    {
+      "type": "action",
+      "description": "Close the Record Payment modal and click 'Sign Out' in the sidebar to log out of the administrator session."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify redirection back to the /login page."
+    },
+    {
+      "type": "action",
+      "description": "Log in using customer credentials ('user@subscriptiq.com' / 'User@123')."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify successful login into Customer view with 'CUSTOMER' role badge, sidebar displaying 'Customer Dashboard', and restricted access where 'Products', 'Plans', 'Discount Rules', and 'Tax Rules' links are not present in the sidebar."
+    },
+    {
+      "type": "action",
+      "description": "Navigate to 'Invoices' via the sidebar under the customer account."
+    },
+    {
+      "type": "assertion",
+      "description": "Verify strict tenant data isolation where only records belonging to customer 'Demo Customer' (user@subscriptiq.com) are displayed and administrative actions are hidden."
+    }
+  ]
+}

@@ -33,3 +33,6 @@ get_dashboard.ps1
 
 # Temporary demo lock/cache files
 ~$*
+
+# TestSprite run artifacts
+.testsprite/

@@ -91,6 +91,22 @@ export const subscriptionService = {
   },
 
   /**
+   * Purchase a subscription through the customer catalog
+   * POST /api/subscriptions/purchase
+   * Only sends { productId, planId, variantId, quantity }
+   */
+  async purchaseSubscription(purchaseData) {
+    const payload = {
+      productId: Number(purchaseData.productId),
+      planId: Number(purchaseData.planId),
+      variantId: purchaseData.variantId ? Number(purchaseData.variantId) : null,
+      quantity: Number(purchaseData.quantity) || 1,
+    };
+    const response = await apiClient.post('/api/subscriptions/purchase', payload);
+    return normalizeSubscriptionResponse(response.data);
+  },
+
+  /**
    * Get single subscription details
    * GET /api/subscriptions/{id}
    */

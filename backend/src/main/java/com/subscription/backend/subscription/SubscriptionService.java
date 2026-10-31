@@ -6,6 +6,7 @@ import com.subscription.backend.customer.CustomerRepository;
 import com.subscription.backend.customer.CustomerService;
 import com.subscription.backend.exception.BusinessRuleException;
 import com.subscription.backend.exception.ResourceNotFoundException;
+import com.subscription.backend.invoice.InvoiceService;
 import com.subscription.backend.plan.LifecycleRule;
 import com.subscription.backend.plan.Plan;
 import com.subscription.backend.plan.PlanRepository;
@@ -42,6 +43,7 @@ public class SubscriptionService {
     private final PlanService planService;
     private final AuthService authService;
     private final CustomerService customerService;
+    private final InvoiceService invoiceService;
 
     @Transactional
     public SubscriptionDto.SubscriptionResponse createSubscription(SubscriptionDto.SubscriptionRequest request) {
@@ -117,6 +119,91 @@ public class SubscriptionService {
                 .build();
 
         Subscription saved = subscriptionRepository.save(subscription);
+        return toSubscriptionResponse(saved);
+    }
+
+    @Transactional
+    public SubscriptionDto.SubscriptionResponse purchaseSubscription(SubscriptionDto.CustomerPurchaseRequest request) {
+        UserPrincipal currentUser = authService.getCurrentUser();
+        if (currentUser == null || currentUser.getRole() != Role.CUSTOMER) {
+            throw new AccessDeniedException("Access denied: Only CUSTOMER users can purchase subscriptions through the catalog");
+        }
+
+        Long customerId = currentUser.getCustomerId();
+        if (customerId == null) {
+            throw new AccessDeniedException("Access denied: Authenticated customer profile not found");
+        }
+
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Customer not found with id: " + customerId));
+
+        Product product = productRepository.findById(request.getProductId())
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with id: " + request.getProductId()));
+
+        if (!product.isActive()) {
+            throw new BusinessRuleException("Product " + product.getName() + " is currently inactive");
+        }
+
+        Plan plan = planRepository.findById(request.getPlanId())
+                .orElseThrow(() -> new ResourceNotFoundException("Plan not found with id: " + request.getPlanId()));
+
+        // Validate Product-Plan compatibility, plan active status, and availability window
+        planService.validateProductPlanCompatibility(product.getId(), plan.getId());
+
+        // Validate quantity against plan minimum quantity
+        if (request.getQuantity() == null || request.getQuantity() < 1) {
+            throw new BusinessRuleException("Quantity must be at least 1");
+        }
+        if (request.getQuantity() < plan.getMinimumQuantity()) {
+            throw new BusinessRuleException("Quantity (" + request.getQuantity() +
+                    ") is less than the plan's minimum required quantity (" + plan.getMinimumQuantity() + ")");
+        }
+
+        // Validate optional variant
+        ProductVariant variant = null;
+        if (request.getVariantId() != null) {
+            variant = productVariantRepository.findById(request.getVariantId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Variant not found with id: " + request.getVariantId()));
+            if (!variant.getProduct().getId().equals(product.getId())) {
+                throw new BusinessRuleException("Variant id " + request.getVariantId() + " does not belong to product " + product.getId());
+            }
+            if (!variant.isActive()) {
+                throw new BusinessRuleException("Variant " + variant.getName() + " is not currently active");
+            }
+        }
+
+        // Price calculation: strictly computed from backend catalog values
+        BigDecimal basePrice = (product.getSalesPrice() != null) ? product.getSalesPrice() : BigDecimal.ZERO;
+        BigDecimal variantAdj = (variant != null && variant.getPriceAdjustment() != null)
+                ? variant.getPriceAdjustment() : BigDecimal.ZERO;
+        BigDecimal planPrice = (plan.getPrice() != null) ? plan.getPrice() : BigDecimal.ZERO;
+        BigDecimal unitPrice = basePrice.add(variantAdj).add(planPrice);
+        BigDecimal subtotal = unitPrice.multiply(BigDecimal.valueOf(request.getQuantity()));
+
+        LocalDate today = LocalDate.now();
+        String subNumber = generateSubscriptionNumber();
+
+        // Customer purchases start in CONFIRMED state awaiting payment/billing
+        Subscription subscription = Subscription.builder()
+                .subscriptionNumber(subNumber)
+                .customer(customer)
+                .plan(plan)
+                .product(product)
+                .variant(variant)
+                .quantity(request.getQuantity())
+                .startDate(today)
+                .expiryDate(null)
+                .nextBillingDate(today)
+                .agreedUnitPrice(unitPrice)
+                .subtotal(subtotal)
+                .status(SubscriptionStatus.CONFIRMED)
+                .build();
+
+        Subscription saved = subscriptionRepository.save(subscription);
+
+        // Automatically generate initial invoice for the confirmed subscription
+        invoiceService.createInvoiceForPeriod(saved, today);
+
         return toSubscriptionResponse(saved);
     }
 

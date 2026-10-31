@@ -11,6 +11,7 @@ import {
   LogOut,
   ShieldCheck,
   Building2,
+  ShoppingBag,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
@@ -24,6 +25,12 @@ export function Sidebar() {
       path: '/dashboard',
       icon: LayoutDashboard,
       visible: true,
+    },
+    {
+      label: 'Product Catalog',
+      path: '/catalog',
+      icon: ShoppingBag,
+      visible: true, // Customers, Staff, and Admins all browse the catalog
     },
     {
       label: 'Products',
