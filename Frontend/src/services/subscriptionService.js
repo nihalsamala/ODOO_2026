@@ -157,6 +157,19 @@ export const subscriptionService = {
       return normalizeSubscriptionResponse(response.data);
     }
   },
+
+  /**
+   * Fetch upcoming subscription renewal alerts
+   * GET /api/subscriptions/renewal-alerts
+   */
+  async getRenewalAlerts(params = {}) {
+    const cleanParams = {};
+    if (params.daysAhead) cleanParams.daysAhead = params.daysAhead;
+    if (params.customerId) cleanParams.customerId = params.customerId;
+
+    const response = await apiClient.get('/api/subscriptions/renewal-alerts', { params: cleanParams });
+    return Array.isArray(response.data) ? response.data : [];
+  },
 };
 
 export default subscriptionService;

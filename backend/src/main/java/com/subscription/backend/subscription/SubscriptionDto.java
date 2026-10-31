@@ -69,4 +69,31 @@ public class SubscriptionDto {
         private LocalDate pausedAt;
         private LocalDateTime createdAt;
     }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    @Builder
+    public static class RenewalAlertResponse {
+        private Long subscriptionId;
+        private String subscriptionNumber;
+        private Long customerId;
+        private String customerName;
+        private String customerEmail;
+        private Long productId;
+        private String productName;
+        private Long planId;
+        private String planName;
+        private String billingInterval;
+        private String lifecycleRule;
+        private SubscriptionStatus status;
+        private LocalDate relevantDate;
+        private String dateType;
+        private long daysRemaining;
+        private BigDecimal amount;
+        private boolean autoRenew;
+        private boolean actionRequired;
+        private String alertLevel;
+        private String alertMessage;
+    }
 }

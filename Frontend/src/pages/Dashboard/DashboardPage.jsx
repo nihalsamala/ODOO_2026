@@ -23,6 +23,7 @@ import Badge from '../../components/common/Badge';
 import Button from '../../components/common/Button';
 import LoadingSpinner from '../../components/common/LoadingSpinner';
 import ConfirmDialog from '../../components/common/ConfirmDialog';
+import RenewalAlertsSection from './RenewalAlertsSection';
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -272,6 +273,9 @@ export function DashboardPage() {
           </div>
         </div>
       </div>
+
+      {/* Subscription Renewal & Expiration Alerts */}
+      <RenewalAlertsSection daysAhead={7} />
 
       {/* Visual Aggregation: Revenue Velocity & Collections Progress */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '24px', marginBottom: '24px' }}>

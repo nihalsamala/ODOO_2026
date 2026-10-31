@@ -212,6 +212,50 @@ export async function handleMockRequest(config) {
   // -------------------------------------------------------------
   // 5. SUBSCRIPTIONS
   // -------------------------------------------------------------
+  if (cleanUrl === '/api/subscriptions/renewal-alerts' && method.toLowerCase() === 'get') {
+    let list = [...(db.subscriptions || [])];
+    if (currentUser && currentUser.role === 'CUSTOMER') {
+      list = list.filter((s) => s.customerId === currentUser.id);
+    }
+    const daysAhead = Number(params?.daysAhead) || 7;
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    const alerts = list
+      .filter((s) => s.status !== 'CLOSED' && s.status !== 'DRAFT')
+      .map((s) => {
+        const nextDate = s.nextBillingDate ? new Date(s.nextBillingDate) : null;
+        if (nextDate) nextDate.setHours(0, 0, 0, 0);
+        const diffDays = nextDate ? Math.round((nextDate - now) / (1000 * 60 * 60 * 24)) : 3;
+        const daysRemaining = Math.max(0, diffDays);
+        return {
+          subscriptionId: s.id,
+          subscriptionNumber: s.subscriptionNumber || s.number,
+          customerId: s.customerId,
+          customerName: s.customerName,
+          customerEmail: s.customerEmail,
+          productId: s.productId,
+          productName: s.productName || s.lines?.[0]?.productName || 'Subscription Item',
+          planId: s.planId,
+          planName: s.planName || 'Standard Plan',
+          billingInterval: s.billingInterval || 'MONTHLY',
+          lifecycleRule: s.lifecycleRule || 'AUTO_RENEW',
+          status: s.status,
+          relevantDate: s.nextBillingDate,
+          dateType: 'NEXT_BILLING_DATE',
+          daysRemaining: daysRemaining,
+          amount: s.agreedTotal || s.subtotal || 0,
+          autoRenew: s.lifecycleRule === 'AUTO_RENEW' && s.status !== 'PAUSED',
+          actionRequired: s.status === 'PAUSED' || s.lifecycleRule !== 'AUTO_RENEW',
+          alertLevel: daysRemaining <= 2 || s.status === 'PAUSED' ? 'URGENT' : daysRemaining <= 5 ? 'WARNING' : 'INFO',
+          alertMessage: s.status === 'PAUSED' ? 'Subscription paused: Billing deferred.' : `Renewing in ${daysRemaining} day(s).`,
+        };
+      })
+      .filter((a) => a.daysRemaining >= 0 && a.daysRemaining <= daysAhead);
+
+    return { status: 200, data: alerts };
+  }
+
   if (cleanUrl === '/api/subscriptions' && method.toLowerCase() === 'get') {
     let list = [...db.subscriptions];
     // Enforce customer ownership isolation

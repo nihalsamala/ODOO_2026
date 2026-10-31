@@ -22,6 +22,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -171,5 +172,158 @@ class SubscriptionServiceTest {
         assertEquals(SubscriptionStatus.ACTIVE, resumed.getStatus());
         assertNull(resumed.getPausedAt());
         assertTrue(resumed.getNextBillingDate().isAfter(oldBillingDate));
+    }
+
+    @Test
+    void testGetUpcomingRenewalAlerts_BoundaryDueTodayAnd7Days() {
+        LocalDate asOfDate = LocalDate.of(2026, 11, 1);
+
+        Subscription subDueToday = Subscription.builder()
+                .id(101L)
+                .subscriptionNumber("SUB-TODAY")
+                .customer(sampleCustomer)
+                .product(sampleProduct)
+                .plan(samplePlan)
+                .quantity(1)
+                .startDate(asOfDate.minusMonths(1))
+                .nextBillingDate(asOfDate) // Due today (0 days remaining)
+                .agreedUnitPrice(new BigDecimal("120.00"))
+                .subtotal(new BigDecimal("120.00"))
+                .status(SubscriptionStatus.ACTIVE)
+                .build();
+
+        Subscription subDue7Days = Subscription.builder()
+                .id(102L)
+                .subscriptionNumber("SUB-DAY-7")
+                .customer(sampleCustomer)
+                .product(sampleProduct)
+                .plan(samplePlan)
+                .quantity(1)
+                .startDate(asOfDate.minusMonths(1))
+                .nextBillingDate(asOfDate.plusDays(7)) // Due exactly 7 days from today
+                .agreedUnitPrice(new BigDecimal("120.00"))
+                .subtotal(new BigDecimal("120.00"))
+                .status(SubscriptionStatus.ACTIVE)
+                .build();
+
+        when(subscriptionRepository.findUpcomingRenewalAlerts(any(), eq(asOfDate), eq(asOfDate.plusDays(7))))
+                .thenReturn(List.of(subDueToday, subDue7Days));
+
+        List<SubscriptionDto.RenewalAlertResponse> alerts =
+                subscriptionService.getUpcomingRenewalAlerts(7, null, asOfDate);
+
+        assertEquals(2, alerts.size());
+
+        // Verify boundary 0 days (today)
+        SubscriptionDto.RenewalAlertResponse alertToday = alerts.get(0);
+        assertEquals("SUB-TODAY", alertToday.getSubscriptionNumber());
+        assertEquals(0L, alertToday.getDaysRemaining());
+        assertEquals(asOfDate, alertToday.getRelevantDate());
+        assertEquals("URGENT", alertToday.getAlertLevel());
+        assertTrue(alertToday.isAutoRenew());
+
+        // Verify boundary 7 days
+        SubscriptionDto.RenewalAlertResponse alert7Days = alerts.get(1);
+        assertEquals("SUB-DAY-7", alert7Days.getSubscriptionNumber());
+        assertEquals(7L, alert7Days.getDaysRemaining());
+        assertEquals(asOfDate.plusDays(7), alert7Days.getRelevantDate());
+        assertEquals("INFO", alert7Days.getAlertLevel());
+    }
+
+    @Test
+    void testGetUpcomingRenewalAlerts_PausedSubscription_RequiresAction() {
+        LocalDate asOfDate = LocalDate.of(2026, 11, 1);
+
+        Subscription subPaused = Subscription.builder()
+                .id(103L)
+                .subscriptionNumber("SUB-PAUSED")
+                .customer(sampleCustomer)
+                .product(sampleProduct)
+                .plan(samplePlan)
+                .quantity(1)
+                .startDate(asOfDate.minusMonths(1))
+                .nextBillingDate(asOfDate.plusDays(3))
+                .agreedUnitPrice(new BigDecimal("120.00"))
+                .subtotal(new BigDecimal("120.00"))
+                .status(SubscriptionStatus.PAUSED)
+                .pausedAt(asOfDate.minusDays(5))
+                .build();
+
+        when(subscriptionRepository.findUpcomingRenewalAlerts(any(), eq(asOfDate), eq(asOfDate.plusDays(7))))
+                .thenReturn(List.of(subPaused));
+
+        List<SubscriptionDto.RenewalAlertResponse> alerts =
+                subscriptionService.getUpcomingRenewalAlerts(7, null, asOfDate);
+
+        assertEquals(1, alerts.size());
+        SubscriptionDto.RenewalAlertResponse alert = alerts.get(0);
+        assertEquals("SUB-PAUSED", alert.getSubscriptionNumber());
+        assertEquals(SubscriptionStatus.PAUSED, alert.getStatus());
+        assertTrue(alert.isActionRequired());
+        assertFalse(alert.isAutoRenew());
+        assertTrue(alert.getAlertMessage().contains("paused"));
+    }
+
+    @Test
+    void testGetUpcomingRenewalAlerts_EmptyResults_ReturnsEmptyList() {
+        LocalDate asOfDate = LocalDate.of(2026, 11, 1);
+
+        when(subscriptionRepository.findUpcomingRenewalAlerts(any(), eq(asOfDate), eq(asOfDate.plusDays(7))))
+                .thenReturn(List.of());
+
+        List<SubscriptionDto.RenewalAlertResponse> alerts =
+                subscriptionService.getUpcomingRenewalAlerts(7, null, asOfDate);
+
+        assertNotNull(alerts);
+        assertTrue(alerts.isEmpty());
+    }
+
+    @Test
+    void testGetUpcomingRenewalAlerts_ExcludedStatus_ClosedPassedToRepository() {
+        LocalDate asOfDate = LocalDate.of(2026, 11, 1);
+
+        when(subscriptionRepository.findUpcomingRenewalAlerts(argThat(statuses ->
+                statuses.contains(SubscriptionStatus.CLOSED) &&
+                statuses.contains(SubscriptionStatus.DRAFT)),
+                eq(asOfDate), eq(asOfDate.plusDays(7))))
+                .thenReturn(List.of());
+
+        List<SubscriptionDto.RenewalAlertResponse> alerts =
+                subscriptionService.getUpcomingRenewalAlerts(7, null, asOfDate);
+
+        assertNotNull(alerts);
+        assertTrue(alerts.isEmpty());
+        verify(subscriptionRepository).findUpcomingRenewalAlerts(
+                argThat(statuses -> statuses.contains(SubscriptionStatus.CLOSED)),
+                eq(asOfDate),
+                eq(asOfDate.plusDays(7))
+        );
+    }
+
+    @Test
+    void testGetUpcomingRenewalAlerts_DueIn8Days_ExcludedFromAlerts() {
+        LocalDate asOfDate = LocalDate.of(2026, 11, 1);
+
+        Subscription subDue8Days = Subscription.builder()
+                .id(104L)
+                .subscriptionNumber("SUB-DAY-8")
+                .customer(sampleCustomer)
+                .product(sampleProduct)
+                .plan(samplePlan)
+                .quantity(1)
+                .startDate(asOfDate.minusMonths(1))
+                .nextBillingDate(asOfDate.plusDays(8))
+                .agreedUnitPrice(new BigDecimal("120.00"))
+                .subtotal(new BigDecimal("120.00"))
+                .status(SubscriptionStatus.ACTIVE)
+                .build();
+
+        when(subscriptionRepository.findUpcomingRenewalAlerts(any(), eq(asOfDate), eq(asOfDate.plusDays(7))))
+                .thenReturn(List.of(subDue8Days));
+
+        List<SubscriptionDto.RenewalAlertResponse> alerts =
+                subscriptionService.getUpcomingRenewalAlerts(7, null, asOfDate);
+
+        assertTrue(alerts.isEmpty());
     }
 }

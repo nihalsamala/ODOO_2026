@@ -6,6 +6,7 @@ import com.subscription.backend.customer.CustomerRepository;
 import com.subscription.backend.customer.CustomerService;
 import com.subscription.backend.exception.BusinessRuleException;
 import com.subscription.backend.exception.ResourceNotFoundException;
+import com.subscription.backend.plan.LifecycleRule;
 import com.subscription.backend.plan.Plan;
 import com.subscription.backend.plan.PlanRepository;
 import com.subscription.backend.plan.PlanService;
@@ -23,6 +24,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -267,5 +270,133 @@ public class SubscriptionService {
                 .pausedAt(sub.getPausedAt())
                 .createdAt(sub.getCreatedAt())
                 .build();
+    }
+
+    @Transactional(readOnly = true)
+    public List<SubscriptionDto.RenewalAlertResponse> getUpcomingRenewalAlerts(int daysAhead, Long customerId, LocalDate asOfDate) {
+        UserPrincipal currentUser = authService.getCurrentUser();
+        Long effectiveCustomerId = customerId;
+        if (currentUser != null && currentUser.getRole() == Role.CUSTOMER) {
+            effectiveCustomerId = currentUser.getCustomerId();
+        }
+
+        LocalDate today = (asOfDate != null) ? asOfDate : LocalDate.now();
+        int validDays = (daysAhead > 0) ? daysAhead : 7;
+        LocalDate endDate = today.plusDays(validDays);
+
+        List<SubscriptionStatus> excludedStatuses = List.of(
+                SubscriptionStatus.CLOSED,
+                SubscriptionStatus.DRAFT,
+                SubscriptionStatus.QUOTATION
+        );
+
+        List<Subscription> subscriptions;
+        if (effectiveCustomerId != null) {
+            subscriptions = subscriptionRepository.findUpcomingRenewalAlertsByCustomerId(
+                    effectiveCustomerId, excludedStatuses, today, endDate);
+        } else {
+            subscriptions = subscriptionRepository.findUpcomingRenewalAlerts(
+                    excludedStatuses, today, endDate);
+        }
+
+        List<SubscriptionDto.RenewalAlertResponse> alerts = new ArrayList<>();
+        for (Subscription sub : subscriptions) {
+            LocalDate relevantDate = sub.getNextBillingDate();
+            String dateType = "NEXT_BILLING_DATE";
+
+            if (sub.getExpiryDate() != null
+                    && !sub.getExpiryDate().isBefore(today)
+                    && !sub.getExpiryDate().isAfter(endDate)) {
+                if (relevantDate == null || !sub.getExpiryDate().isAfter(relevantDate)) {
+                    relevantDate = sub.getExpiryDate();
+                    dateType = "EXPIRATION_DATE";
+                }
+            }
+
+            if (relevantDate == null || relevantDate.isBefore(today) || relevantDate.isAfter(endDate)) {
+                continue;
+            }
+
+            long daysRemaining = ChronoUnit.DAYS.between(today, relevantDate);
+
+            LifecycleRule lifecycle = (sub.getPlan() != null && sub.getPlan().getLifecycleRule() != null)
+                    ? sub.getPlan().getLifecycleRule()
+                    : LifecycleRule.AUTO_RENEW;
+            boolean autoRenew = (lifecycle == LifecycleRule.AUTO_RENEW && sub.getStatus() != SubscriptionStatus.PAUSED);
+
+            boolean actionRequired = false;
+            String alertMessage;
+
+            if (sub.getStatus() == SubscriptionStatus.PAUSED) {
+                actionRequired = true;
+                alertMessage = "Subscription paused: Billing deferred until unpaused.";
+            } else if ("EXPIRATION_DATE".equals(dateType)) {
+                if (lifecycle == LifecycleRule.AUTO_CLOSE) {
+                    actionRequired = true;
+                    alertMessage = daysRemaining == 0
+                            ? "Expires today: Will automatically close."
+                            : "Expires in " + daysRemaining + " day(s): Will automatically close.";
+                } else if (lifecycle == LifecycleRule.MANUAL_RENEWAL) {
+                    actionRequired = true;
+                    alertMessage = daysRemaining == 0
+                            ? "Expires today: Manual renewal required."
+                            : "Expires in " + daysRemaining + " day(s): Manual renewal required.";
+                } else {
+                    alertMessage = "Term expiration approaching in " + daysRemaining + " day(s).";
+                }
+            } else {
+                if (lifecycle == LifecycleRule.AUTO_RENEW) {
+                    alertMessage = daysRemaining == 0
+                            ? "Renewing today: Scheduled for automatic charge."
+                            : "Renewing in " + daysRemaining + " day(s): Scheduled for automatic charge.";
+                } else if (lifecycle == LifecycleRule.MANUAL_RENEWAL) {
+                    actionRequired = true;
+                    alertMessage = daysRemaining == 0
+                            ? "Due today: Manual renewal required to avoid suspension."
+                            : "Due in " + daysRemaining + " day(s): Manual renewal required.";
+                } else {
+                    actionRequired = true;
+                    alertMessage = daysRemaining == 0
+                            ? "Due today: Will auto-close after billing."
+                            : "Due in " + daysRemaining + " day(s): Will auto-close after billing.";
+                }
+            }
+
+            String alertLevel;
+            if (daysRemaining <= 2 || sub.getStatus() == SubscriptionStatus.PAUSED) {
+                alertLevel = "URGENT";
+            } else if (daysRemaining <= 5) {
+                alertLevel = "WARNING";
+            } else {
+                alertLevel = "INFO";
+            }
+
+            alerts.add(SubscriptionDto.RenewalAlertResponse.builder()
+                    .subscriptionId(sub.getId())
+                    .subscriptionNumber(sub.getSubscriptionNumber())
+                    .customerId(sub.getCustomer() != null ? sub.getCustomer().getId() : null)
+                    .customerName(sub.getCustomer() != null ? sub.getCustomer().getName() : "Unknown Customer")
+                    .customerEmail(sub.getCustomer() != null ? sub.getCustomer().getEmail() : null)
+                    .productId(sub.getProduct() != null ? sub.getProduct().getId() : null)
+                    .productName(sub.getProduct() != null ? sub.getProduct().getName() : "Subscription Service")
+                    .planId(sub.getPlan() != null ? sub.getPlan().getId() : null)
+                    .planName(sub.getPlan() != null ? sub.getPlan().getName() : "Plan")
+                    .billingInterval(sub.getPlan() != null && sub.getPlan().getBillingInterval() != null
+                            ? sub.getPlan().getBillingInterval().name() : "MONTHLY")
+                    .lifecycleRule(lifecycle.name())
+                    .status(sub.getStatus())
+                    .relevantDate(relevantDate)
+                    .dateType(dateType)
+                    .daysRemaining(daysRemaining)
+                    .amount(sub.getSubtotal() != null ? sub.getSubtotal() : BigDecimal.ZERO)
+                    .autoRenew(autoRenew)
+                    .actionRequired(actionRequired)
+                    .alertLevel(alertLevel)
+                    .alertMessage(alertMessage)
+                    .build());
+        }
+
+        alerts.sort(Comparator.comparingLong(SubscriptionDto.RenewalAlertResponse::getDaysRemaining));
+        return alerts;
     }
 }

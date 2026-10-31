@@ -22,6 +22,13 @@ public class SubscriptionController {
         return ResponseEntity.ok(subscriptionService.getSubscriptions(customerId, status));
     }
 
+    @GetMapping("/renewal-alerts")
+    public ResponseEntity<List<SubscriptionDto.RenewalAlertResponse>> getRenewalAlerts(
+            @RequestParam(defaultValue = "7") int daysAhead,
+            @RequestParam(required = false) Long customerId) {
+        return ResponseEntity.ok(subscriptionService.getUpcomingRenewalAlerts(daysAhead, customerId, null));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<SubscriptionDto.SubscriptionResponse> getSubscriptionById(@PathVariable Long id) {
         return ResponseEntity.ok(subscriptionService.getSubscriptionById(id));
