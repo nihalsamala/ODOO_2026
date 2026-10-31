@@ -8,4 +8,6 @@ import java.util.List;
 @Repository
 public interface PlanRepository extends JpaRepository<Plan, Long> {
     List<Plan> findByActive(boolean active);
+    java.util.Optional<Plan> findByName(String name);
+    boolean existsByName(String name);
 }

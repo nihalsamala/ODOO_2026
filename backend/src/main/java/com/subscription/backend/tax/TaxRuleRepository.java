@@ -9,5 +9,6 @@ import java.util.Optional;
 @Repository
 public interface TaxRuleRepository extends JpaRepository<TaxRule, Long> {
     Optional<TaxRule> findByName(String name);
+    boolean existsByName(String name);
     List<TaxRule> findByActive(boolean active);
 }
